@@ -1,0 +1,86 @@
+name: MATLAB Batch Run
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  run-shards:
+    name: Part ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 12 free public-repository jobs. Change both this list and
+        # RUN_PARTS together if you want a different part count.
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up MATLAB and required toolboxes
+        uses: matlab-actions/setup-matlab@v3
+        with:
+          release: latest
+          products: >
+            Parallel_Computing_Toolbox
+            Statistics_and_Machine_Learning_Toolbox
+          cache: true
+
+      - name: Run this part
+        uses: matlab-actions/run-command@v3
+        env:
+          RUN_PARTS: '12'
+          RUN_PART: ${{ matrix.shard }}
+        with:
+          command: "[T,ByCombo,Overall] = a01;"
+
+      - name: Upload shard result
+        uses: actions/upload-artifact@v4
+        with:
+          name: dvhop-shard-${{ matrix.shard }}
+          path: |
+            dvhop_fast_9000_v3_shard_*/DVHOP_FAST_9000_RESULTS.mat
+            dvhop_fast_9000_v3_shard_*/DVHOP_FAST_9000_PER_TRIAL.csv
+            dvhop_fast_9000_v3_shard_*/DVHOP_FAST_9000_BY_COMBO.csv
+            dvhop_fast_9000_v3_shard_*/DVHOP_FAST_9000_OVERALL.csv
+          if-no-files-found: error
+          retention-days: 30
+
+  merge-results:
+    name: Combine results
+    runs-on: ubuntu-latest
+    needs: run-shards
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Download every shard
+        uses: actions/download-artifact@v5
+        with:
+          pattern: dvhop-shard-*
+          path: shard_results
+
+      - name: Set up MATLAB for final statistical merge
+        uses: matlab-actions/setup-matlab@v3
+        with:
+          release: latest
+          products: Statistics_and_Machine_Learning_Toolbox
+          cache: true
+
+      - name: Merge and verify 9000 trials
+        uses: matlab-actions/run-command@v3
+        with:
+          command: "[T,ByCombo,Overall] = a02('shard_results','final_results');"
+
+      - name: Upload final complete results
+        uses: actions/upload-artifact@v4
+        with:
+          name: DVHOP-FINAL-9000-RESULTS
+          path: final_results/
+          if-no-files-found: error
+          retention-days: 30
